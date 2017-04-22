@@ -26,7 +26,7 @@ To answer these questions, I will focus on Ethiopia. The World Bank classifies E
 
 First, I will create a baseline accuracy score by replicating the World Bank methodology, while reserving 15 percent out of the sample for testing. I will score accuracy using the mean absolute percentage error (MAPE) between the predicted and actual income for the reserved sample. The data is free to use with registration here: [2015-2016 Socioeconomic Survey](http://microdata.worldbank.org/index.php/catalog/2783). To see the R code for this step, please see lsms_cleaning and lsms_wbmodel.   
 
-Second, I will use other supervised learning approaches to create alternative methodologies, comparing their accuracy to the World Bank methodology. To see the R code for this step, please see lsms_supervusedlearning. 
+Second, I will use other supervised learning approaches to create alternative methodologies, comparing their accuracy to the World Bank methodology. To see the R code for this step, please see lsms_supervisedlearning. 
 
 Finally, I will use my best supervised learning approach and the poverty mapping model to impute income and/or poverty status into the 2007 census data. [Census data available here](http://microdata.worldbank.org/index.php/catalog/2747) I will then compare if the approaches lead to different prescriptive geogrpahic areas to target for poverty alleviation in Ethiopia. To see the R code for this step, please see census_imputation.
 
