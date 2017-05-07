@@ -1,0 +1,483 @@
+---
+title: "Using Supervised Learning to Map Poverty"
+author: "Robert Morello"
+date: "May 6, 2017"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+### Overview
+
+In the developing world, often data are collected to be representative of the nation or large sub-national areas, such as states or provinces. Although these data collection approaches reduce administrative costs, they often cannot provide precise enough estimates at granular geographic levels to target social programs. 
+
+### Background 
+In response to this need, the World Bank research department has been conducting a process called ["Poverty Mapping."](http://econ.worldbank.org/WBSITE/EXTERNAL/EXTDEC/EXTRESEARCH/0,,contentMDK:20699544~pagePK:64214825~piPK:64214943~theSitePK:469382,00.html) Researchers use a survey-to-census imputation model to provide estimates of the proportion of the population living in poverty at more granular geographic levels, such as counties or districts.
+
+This methodology presents several short comings, and it has been the subject of controversy. In 2006, development economists Abhijit Banerjee, Angus Deaton, Nora Lustig, and Ken Rogoff wrote, "The difficult and contentious issue with this work [poverty mapping] is the accuracy of these estimates, and indeed whether they are accurate enough to be useful at all." 
+
+Still, the World Bank uses this approach. Foremost, the methodology fails to take a scientific approach to prediction. It does not retain any out of sample "test set" to validate the model's accuracy and the model's calibration is seemingly arbitrary. 
+
+### Research Questions and Outline
+This project aims to improve upon the Poverty Mapping methodology. Specifically, it will answer three questions: 
+1. How accurate is the World Bank's poverty mapping approach?
+2. Are there other data science methods that could more accurately predict poverty status than the current poverty mapping approach? 
+3. How do the methods' accuracy impact the calculation of the number of poor households?
+
+To answer these questions, I will focus on Ethiopia. The World Bank classifies Ethiopia as an low income  with about a 37 percent of its population living on less than $2 per day. 
+
+I find that models created by the World Bank methodology make fairly inaccurate predictions of income, and subsequently poverty status. In this work, other approaches to prediction, such as decision trees and random forests, do not create more accurate predictions.
+
+The outline of this report is as follows. First, I will create a baseline accuracy score by replicating the World Bank methodology, while reserving 15 percent of the sample for testing The data is semi-public with registration here: [Ethiopia Socioeconomic Survey 2015-2016 ](http://microdata.worldbank.org/index.php/catalog/2783). Second, I will use other supervised learning approaches to create alternative methodologies, comparing their accuracy to the World Bank methodology. Finally, I conclude by comparing the differences in the size of the "poor" population in the eleven regions of Ethiopia. 
+
+### Replicating the Poverty Mapping Approach
+Researchers use a survey-to-census imputation model to provide estimates of the proportion of the population living in poverty at more granular geographic levels, such as counties or districts. To perform this process, the research normally follows the following steps.   
+1. Begin with a living standards measurement survey (LSMS), in which annual consumption/income, and subsequently poverty status, are determined.  
+2. Build an OLS model on the LSMS data that uses a set of features to predict income. These indicators must exist in both the LSMS and census data sets.
+3. A few rules of thumb guide model construction: 
+  (a) retain predictors that have a statistically significant relationship with income; 
+  (b) focus on getting the R-squared above 0.5. 
+4. Apply this model's coefficients to the observations in the census to predict income. 
+5. Then, the census data set provides an adequate sample size to determine poverty at a more granular administrative level. 
+
+```{r, echo = FALSE}
+## Before running this code you must run Append A data cleaning
+options(warn=-1)
+setwd("D:/Dropbox/Dropbox/Personal/data_science/assignments/project/")
+require(knitr)
+source("lsms_datacleaning.R")
+```
+
+```{r echo = FALSE}
+## crease train and test sets 
+## Remove all observations with missing values - needed for RF and helpful for lm
+lsms <- lsms[,c("log_total_cons_ann", "total_cons_ann", "married_hhead", "adulteq", "hh_size", "female_hhead","hhead_illiterate", "hhead_orthodox", "hhead_protestant", "hhead_islam",  "pipedwater", "unprotectedwater",  "notoilet", "latrine", "flushtoilet", "modernkitchen", "advcookingfuel", "electriclighting", "finishedwalls",  "woodwalls",  "finishedroof",  "finishedfloor", "dirtfloor", "radio", "tv", "saq01", "urban", "poor")]
+  lsms <- lsms[complete.cases(lsms),]  
+
+  # a random sample of 85 percent of the households 
+  lsms <- lsms[complete.cases(lsms),] 
+  set.seed(123456)
+  
+  lsms$rand <- runif(nrow(lsms)) 
+  lsms$test <- ifelse(lsms$rand > 0.85, 1, 0)
+  lsms.test <- lsms[lsms$test == 0,]
+  
+    
+## kitchen sink approach  
+wb.lm1 <-  lm(log_total_cons_ann ~ married_hhead + log(hh_size) + female_hhead + hhead_illiterate+ hhead_orthodox + hhead_protestant + hhead_islam + pipedwater + unprotectedwater +  notoilet + latrine + flushtoilet +  modernkitchen +  advcookingfuel +  electriclighting +  finishedwalls + woodwalls +  finishedroof +  finishedfloor + dirtfloor + radio + tv + radio*tv + factor(saq01) + urban, data = lsms.test) 
+summary(wb.lm1)
+```
+This model has an R-squared of above 0.5 and thus satisfies the first optimization requirement of the World Bank approach. I will now remove any not statistically significant predictors. Several non-statistically significant predictors are part of a battery of dummy variables. If the battery is jointly significant, these covariates should be retained.   
+```{r echo = FALSE}
+library("plm")
+library("car")
+## remove non-statistically significant variables
+  ## first let's check for joint-significance 
+  linearHypothesis(wb.lm1, c("notoilet", "latrine", "flushtoilet = 0"), test="F")
+  # yes 
+  linearHypothesis(wb.lm1, c("hhead_orthodox", "hhead_protestant", "hhead_islam = 0"), test="F")
+  # yes 
+  linearHypothesis(wb.lm1, c("pipedwater", "unprotectedwater = 0"), test="F")
+  # yes 
+  linearHypothesis(wb.lm1, c("finishedwalls", "woodwalls = 0"), test="F")
+  # no 
+  linearHypothesis(wb.lm1, c("finishedfloor", "dirtfloor= 0"), test="F")
+  # yes 
+```
+I find that wall types is not a statistically significant predictor and remove it from the model. I know run the final model. 
+```{r echo= FALSE}
+wb.lm2 <-  lm(log_total_cons_ann ~ married_hhead + adulteq + log(hh_size) + female_hhead + hhead_illiterate+ hhead_orthodox + hhead_protestant + hhead_islam + pipedwater + unprotectedwater +  notoilet + latrine + flushtoilet +  modernkitchen +  advcookingfuel +  electriclighting +  finishedroof +  finishedfloor + dirtfloor + radio + tv + radio*tv + factor(saq01) + urban + factor(saq01)*urban, data = lsms.test) 
+summary(wb.lm2)
+```
+This final model, has an r-squared above the desired threshold (0.5) and does not include any covariates that are not at least jointly statistically significant. 
+
+Now, I will use it to predict the average annual household consumption. 
+```{r echo = FALSE}
+## predict results
+lsms$total_cons_ann_loggedpredicted <- predict(wb.lm2, lsms)
+lsms$total_cons_ann_predicted <- exp(lsms$total_cons_ann_loggedpredicted)
+```
+I score these predicted results with the Mean Absolute Percentage Difference. I will score both the in- and out- of sample, as well as the combined sample. This will be the benchmark to which to compare other approaches.
+
+```{r pressure, echo=FALSE}
+# MAPE function 
+mape <- function(yhat, y){
+  #yhat = your prediction
+  #y = original value
+  #Note that code will ignore any missing values
+  return(100*mean(abs(yhat/y - 1), na.rm=T))
+}
+
+mape(lsms$total_cons_ann_predicted, lsms$total_cons_ann)
+mape(lsms[lsms$test == 0,]$total_cons_ann_predicted, lsms[lsms$test == 0,]$total_cons_ann)
+mape(lsms[lsms$test == 1,]$total_cons_ann_predicted, lsms[lsms$test == 1,]$total_cons_ann)
+```
+
+I obtain a MAPE of 46 for the whole sample. I obtain a MAPE of 46 for the in-sample. And, a MAPE of 49 for an out-of-sample test.  
+
+### Supervised learning
+#### Decision Tree
+Supervised learning is branch of data science that allows computer algorithms to classify and/or predict known data, called targets. 
+
+First, I use a regression decision tree to predict the annual income of a household. A decision trees separate distinctly different records into more similar groups. These divisions are called branches. These groups are then divided again until fairly homogeneous groups are formed, e.g. leaves.   
+```{r echo = FALSE}
+## level model 
+library("rpart")
+lsms.dt <- rpart(total_cons_ann ~ married_hhead + adulteq + hh_size + female_hhead + hhead_illiterate+ hhead_orthodox + hhead_protestant + hhead_islam + pipedwater + unprotectedwater +  notoilet + latrine + flushtoilet +  modernkitchen +  advcookingfuel +  electriclighting +  finishedwalls + woodwalls +  finishedroof +  finishedfloor + dirtfloor + radio + tv + saq01 + urban, method = "anova", data = lsms.test)
+plot(lsms.dt)
+```
+
+Again, I predict the annual consumption from the model. And test it's accuracy using the MAPE function. 
+```{r echo= FALSE}
+lsms$total_cons_ann_dtpredicted <- predict(lsms.dt, lsms, type='vector')
+lsms$total_cons_ann_dtpredicted <- predict(lsms.dt, lsms, type='vector')
+
+mape(lsms$total_cons_ann_dtpredicted, lsms$total_cons_ann)
+mape(lsms[lsms$test == 0,]$total_cons_ann_dtpredicted, lsms[lsms$test == 0,]$total_cons_ann)
+mape(lsms[lsms$test == 1,]$total_cons_ann_dtpredicted, lsms[lsms$test == 1,]$total_cons_ann)
+```
+I find a very high MAPE for this model for this model (79 to 80). These scores are high for the whole sample, the in-sample, and out-of-sample tests. In short, it severely under performs the World Bank methodology. 
+
+#### Random Forest
+Next, I use a random regression forest. The intuition behind a random forest is that many multiple decision trees can better model the data than a single tree. I model the data in two ways. The first is the level version of annual consumption. The second is the log annual consumption, similar to the outcome variable for the World Bank OLS models. I run with a very large number of trees (2,000), and I optimize my parameter selection for the models presented here. The first two images are optimizing my parameters  
+```{r echo = FALSE}
+library(randomForest)
+lsms.rf.tune <- tuneRF(lsms.test[,c("married_hhead", "adulteq", "hh_size", "female_hhead", "hhead_illiterate", "hhead_orthodox", "hhead_protestant", "hhead_islam", "pipedwater", "unprotectedwater", "notoilet", "latrine", "flushtoilet", "modernkitchen", "advcookingfuel", "electriclighting", "finishedwalls", "woodwalls", "finishedroof", "finishedfloor", "dirtfloor", "radio", "tv", "saq01", "urban")], lsms.test$total_cons_ann, ntreeTry = 2000, mtryStart = 1, stepFactor = 2, improve = 0.00001, trace = TRUE, plot = TRUE)
+
+tune.param <- lsms.rf.tune[lsms.rf.tune[, 2] == min(lsms.rf.tune[, 2]), 1]
+
+lsms.rf <- randomForest(total_cons_ann ~ married_hhead + adulteq + hh_size + female_hhead + hhead_illiterate+ hhead_orthodox + hhead_protestant + hhead_islam + pipedwater + unprotectedwater +  notoilet + latrine + flushtoilet +  modernkitchen +  advcookingfuel +  electriclighting +  finishedwalls + woodwalls +  finishedroof +  finishedfloor + dirtfloor + radio + tv + saq01 + urban, type = regression, data = lsms.test, ntree=2000, mtry = tune.param) 
+
+## Random Regression Forest - log total consumption
+lsms.rf.tune <- tuneRF(lsms.test[,c("married_hhead", "adulteq", "hh_size", "female_hhead", "hhead_illiterate", "hhead_orthodox", "hhead_protestant", "hhead_islam", "pipedwater", "unprotectedwater", "notoilet", "latrine", "flushtoilet", "modernkitchen", "advcookingfuel", "electriclighting", "finishedwalls", "woodwalls", "finishedroof", "finishedfloor", "dirtfloor", "radio", "tv", "saq01", "urban")], lsms.test$total_cons_ann, ntreeTry = 2000, mtryStart = 1, stepFactor = 2, improve = 0.00001, trace = TRUE, plot = TRUE)
+
+tune.param <- lsms.rf.tune[lsms.rf.tune[, 2] == min(lsms.rf.tune[, 2]), 1]
+
+lsms.rf.log <- randomForest(log_total_cons_ann ~ married_hhead + adulteq + hh_size + female_hhead + hhead_illiterate+ hhead_orthodox + hhead_protestant + hhead_islam + pipedwater + unprotectedwater +  notoilet + latrine + flushtoilet +  modernkitchen +  advcookingfuel +  electriclighting +  finishedwalls + woodwalls +  finishedroof +  finishedfloor + dirtfloor + radio + tv + saq01 + urban, type = regression, data = lsms.test, ntree=2000, mtry = tune.param) 
+```
+
+
+Then, I predict that target variable and check the MAPE as with the other models. 
+```{r echo = FALSE}
+lsms$total_cons_ann_rfpredicted <- predict(lsms.rf, lsms)
+
+mape(lsms$total_cons_ann_rfpredicted, lsms$total_cons_ann)
+mape(lsms[lsms$test == 0,]$total_cons_ann_rfpredicted, lsms[lsms$test == 0,]$total_cons_ann)
+mape(lsms[lsms$test == 1,]$total_cons_ann_rfpredicted, lsms[lsms$test == 1,]$total_cons_ann)
+```
+On the first model, level annual consumption, I find a MAPE of 46 for the whole sample, 41 for the in-sample, and 64 for the out-of-sample. Whole and in-sample errors are similar to the World Bank's OLS; however, the out-of-sample is much higher (64 vs. 48). This does not provide a strong alternative to the World Bank OLS methodology. 
+```{r echo = FALSE}
+lsms$total_cons_ann_rflogpredicted <- predict(lsms.rf.log, lsms)
+lsms$total_cons_ann_rfpredictedfromlog <- exp(lsms$total_cons_ann_rflogpredicted) 
+
+mape(lsms$total_cons_ann_rfpredictedfromlog, lsms$total_cons_ann)
+mape(lsms[lsms$test == 0,]$total_cons_ann_rfpredictedfromlog, lsms[lsms$test == 0,]$total_cons_ann)
+mape(lsms[lsms$test == 1,]$total_cons_ann_rfpredictedfromlog, lsms[lsms$test == 1,]$total_cons_ann)
+```
+
+For the log of annual consumption, I find a MAPE of 35 for the whole sample. 32 for the in-sample, and 51 for the out-of-sample. The whole sample and the in-sample are slightly better than the World Bank OLS, and the out-sample is fairly similar (51 vs. 48). This target variable and method appears to have comparable accuracy to the World Bank OLS approach. 
+
+In this case, it does not appear that the two machine learning approaches, decision tree and random forests, perform better than the World Bank approach. I note that all of the methods are fairly inaccurate. 
+
+### Classifying Poverty 
+The primary objective of poverty mapping is to actually determining which households are "poor" or below a threshold of annual consumption. The OLS method does not provide a strong classification strategy to determine which households are poor. 
+
+In practice, the annual consumption is predicted and then the threshold is applied. In this example, I use $2 per adult equivalent daily consumption in the household. Although this definition attempts to follow the World Bank international definition of "extreme poverty," the resulting proportion is slightly higher than the most current public figures and can be further refined. Because the primary purpose of this research is to explore classification methods and not establish poverty thresholds, I continue with the classification exposition.   
+```{r echo=FALSE}
+## 1st convert the predict annual consumption to daily USD PPP using the same as LSMS cleaning 
+lsms$cons_ann_rfpredictedfromlog_usdppp <- (lsms$total_cons_ann_predicted/20.46410/0.38) 
+lsms$cons_ann_rfpredictedfromlog_usdpppdaily <- lsms$cons_ann_rfpredictedfromlog_usdppp / 360
+lsms$cons_ann_rfpredictedfromlog_usdpppdailyperperson <- lsms$cons_ann_rfpredictedfromlog_usdpppdaily / lsms$adulteq
+lsms$poor_olspredfromlog <- ifelse(lsms$cons_ann_rfpredictedfromlog_usdpppdailyperperson < 2, "poor", "not poor")
+```
+To test the accuracy of the predictions, I use a Mean-F1 score. This is standard statistic to assess the accuracy of classification algorithms. Specifically, the statistic is two times the ratio of the precision rate multiplied by the recall rate divided by the sum of the precision and recall rates. In classification, precision is defined as the true positives divided by the total of true positives and false positives. And, recall is defined as the true positives divided by the sum of the true positive plus the false negatives (total accurately classified). The score is out of 1, where a value of 1 is a very good predictor. 
+```{r, echo = FALSE}
+meanf1 <- function(actual, predicted){
+  #Mean F1 score function
+  #actual = a vector of actual labels
+  #predicted = predicted labels
+  
+  classes <- unique(actual)
+  results <- data.frame()
+  for(k in classes){
+    results <- rbind(results, 
+                     data.frame(class.name = k,
+                                weight = sum(actual == k)/length(actual),
+                                precision = sum(predicted == k & actual == k)/sum(predicted == k), 
+                                recall = sum(predicted == k & actual == k)/sum(actual == k)))
+  }
+  results$score <- results$weight * 2 * (results$precision * results$recall) / (results$precision + results$recall) 
+  return(sum(results$score))
+}
+
+meanf1(lsms$poor, lsms$poor_olspredfromlog)
+meanf1(lsms[lsms$test == 0,]$poor, lsms[lsms$test == 0,]$poor_olspredfromlog)
+meanf1(lsms[lsms$test == 1,]$poor, lsms[lsms$test == 1,]$poor_olspredfromlog)
+
+```
+Here, we find an acceptable, but not exceptional mean F1 score of 74 for the whole sample. And, a slightly worse mean F1 score of 72 for the out-of-sample.  
+
+Recognizing that the decision tree was a very poor model in the earlier work, I skip it in this section. And, I use a new random forest to model poverty status. Again, the first visuals are optimizing my model. 
+```{r echo = FALSE}
+lsms.rf.tune.poor <- tuneRF(lsms.test[,c("married_hhead", "adulteq", "hh_size", "female_hhead", "hhead_illiterate", "hhead_orthodox", "hhead_protestant", "hhead_islam", "pipedwater", "unprotectedwater", "notoilet", "latrine", "flushtoilet", "modernkitchen", "advcookingfuel", "electriclighting", "finishedwalls", "woodwalls", "finishedroof", "finishedfloor", "dirtfloor", "radio", "tv", "saq01", "urban")], factor(lsms.test$poor), ntreeTry = 2000, mtryStart = 1, stepFactor = 2, improve = 0.00001, trace = TRUE, plot = TRUE)
+
+tune.param <- lsms.rf.tune.poor[lsms.rf.tune.poor[, 2] == min(lsms.rf.tune.poor[, 2]), 1]
+
+lsms.rf.poor <- randomForest(factor(poor) ~ married_hhead + adulteq + hh_size + female_hhead + hhead_illiterate+ hhead_orthodox + hhead_protestant + hhead_islam + pipedwater + unprotectedwater +  notoilet + latrine + flushtoilet +  modernkitchen +  advcookingfuel +  electriclighting +  finishedwalls + woodwalls +  finishedroof +  finishedfloor + dirtfloor + radio + tv + saq01 + urban, type = regression, data = lsms.test, ntree=2, mtry = tune.param) 
+
+lsms$rfpredictected_poor <- predict(lsms.rf.poor, lsms)
+```
+
+
+I test the random forest prediction again with the mean F1 score. 
+```{r echo = FALSE}
+
+meanf1(lsms$poor, lsms$rfpredictected_poor)
+meanf1(lsms[lsms$test == 0,]$poor, lsms[lsms$test == 0,]$rfpredictected_poor)
+meanf1(lsms[lsms$test == 1,]$poor, lsms[lsms$test == 1,]$rfpredictected_poor)
+
+```
+I find that random forest perform very similar to the World Bank OLS specification. I find a whole sample, F1-Mean score of 77. An in-sample score of 79, and a marginally lower out-of-sample score of 64. 
+
+### Calculating the Number of Poor Households 
+As stated earlier, the primary purpose of these models is to impute expenditure data into a census. In the census, the sample size is robust enough to make estimates of the proportion of the population at smaller administrative levels, such as districts or counties. 
+
+The most recent census in Ethiopia poses several challenges to this type of application. First and foremost, it was conducted in 2007 - making it about a decade old. Predicting poverty a decade ago is less helpful for policy makers needing to make policy decisions today. In addition, the data for which I obtained for this census does not provide any geographic data, thus rendering this final step impossible.
+
+Instead, I use the whole-of-sample predictions to compare how they would calculate poverty in the regions of Ethiopia. I choose to use the whole-of-sample because it is the largest sample at which to calculate the regional proportions. The out-of-sample predictions would more accurately mirror predictions into a census, but this sample is not large enough to calculate proportions in the regions.  
+
+First, I find  the national proportion of the households in poverty according to the OLS model and the random forest models. 
+
+```{r echo = FALSE}
+lsms$rfpredictected_poor_binary <- ifelse(lsms$rfpredictected_poor == "poor", 1,0)
+lsms$olspredfromlog_poor_binary <- ifelse(lsms$poor_olspredfromlog == "poor", 1,0)
+lsms$poor_binary <- ifelse(lsms$poor == "poor", 1,0)
+
+summary(lsms$rfpredictected_poor_binary)
+summary(lsms$olspredfromlog_poor_binary)
+summary(lsms$poor_binary)
+
+region_poormean <- aggregate(lsms[, c("rfpredictected_poor_binary","olspredfromlog_poor_binary", "poor_binary")], list(lsms$saq01), FUN = mean) 
+regions <- data.frame(region = c(
+"Tigray",
+"Afar",
+"Amhara",
+"Oromia",
+"Somalie",
+"Benshagul Gumuz",
+"snnp",
+"Gambelia",
+"Harari",
+"Addis Ababa",
+"Diredwa")) 
+region_poormean <- cbind(region_poormean, regions)
+
+region_means <- region_poormean[,c("rfpredictected_poor_binary", "olspredfromlog_poor_binary", "poor_binary", "region")] 
+region_means
+```
+According to the data, just under half of the households are considered poor (47.5 percent). In the OLS and RF models, I find very similar proportion of the national population that is poor (50 percent). 
+
+At the regional level, I find very different proportions. For example in the capital Addis Ababa, the data has 15 percent of the household as poor. The OLS model predicts only 1 percent of the population being poor, while the regression tree predicted 9 percent as poor. 
+
+Next, I consider the total number of poor households when these proportions are applied to the regional populations. Significantly different population figures could lead policymakers to allocate resources differently 
+
+```{r, echo=FALSE}
+region_poormean <- cbind(region_poormean, regions)
+population <- data.frame(population = c(
+  5818000,
+  1874000,
+  23209000,
+  36386000,
+  6114000,
+  1057000,
+  20120000,
+  414000,
+  247000,
+  3692000, 
+  461000))
+
+hh_size <- as.data.frame(aggregate(lsms[,"hh_size"], list(lsms$saq01), FUN = mean))
+population <- cbind(population, hh_size)
+population$households <- population$population / population$x 
+
+region_poormean <- cbind(region_poormean, population)
+
+## calculate how many poor households
+region_poormean$poor_hh_ols <-  region_poormean$households *region_poormean$olspredfromlog_poor_binary
+region_poormean$poor_hh_rf <- region_poormean$households * region_poormean$rfpredictected_poor_binary
+region_poormean$poor_hh <- region_poormean$households * region_poormean$poor_binary
+
+region_poormean$difference_ols <- region_poormean$poor_hh_ols - region_poormean$poor_hh
+region_poormean$difference_rf <- region_poormean$poor_hh_rf - region_poormean$poor_hh
+
+summary(region_poormean$difference_ols)
+summary(region_poormean$difference_rf)
+
+mean(abs(region_poormean$difference_ols))
+mean(abs(region_poormean$difference_rf))
+```
+When applying the predictions to the number of households in the regions, I find very different results. Compared to the survey data, the OLS model difference ranges between 116,000 fewer poor households to 442,000 too many poor households. The absolute mean difference is about 96,000 households. 
+
+For the RF model, the difference from the survey data range between 51,000 too few poor households and 448,000 too many poor households. This spread is only slightly smaller than the OLS model. The mean absolute difference is 86,000 households, which is quite similar to the World Bank's OLS specification.
+
+### Conclusion
+This project reexamined the World Bank's approach to measuring poverty. After recreating the methodology on annual consumption data, I found a fairly large mean absolute percent error of 48 in the out-of-sample test. This is substantial error in the prediction. This confirms somewhat the criticism that the approach may not be accurate enough to be useful. In the future, researchers conducting poverty mapping should preserve some sample out of the models to rigorously assess how accurate the model is at predicting poverty.  
+
+I then sought to apply supervised learning to create more accurate predictions, namely regression decision trees and regression random forests. Both of these methods showed little improvement over the World Bank's methodology. 
+
+Finally, I sought to classify if a household was poor or not. The World Bank approach found a mean F1 score of 72 on the out-of-sample test. The regression forest found a mean F1 score of 64 on the out-of-sample score. Again, both of these are not particularly accurate predictors of household poverty status.  
+
+These classification models were then applied to calculate how many poor households were in each of the eleven regions of Ethiopia. On average the World Bank OLS model was off by 96,000 households, while the random forest was off by 86,000. 100,000 households is quite substantial error.   
+
+This work shows that the model matters in classifying poverty and predict total aggregate consumption. None of the models tested in this project are particularly accurate, including the World Bank's current methodology. 
+
+Important policy decisions, such as the allocation of scare national and international development funds, are allocated sub nationally based on the distribution of poverty. Researchers need to recommit themselves to establish more robust methods to map poverty. Although the supervised learning techniques tried here are not vast improvements over the current methodology, researchers should not abandon them in their search for more accurate ways to map poverty. 
+
+### Appendix A - Cleaning the Ethiopia 2015-16 Socioeconomic Survey   
+
+The data is free to use with registration here: [2015-2016 Socioeconomic Survey](http://microdata.worldbank.org/index.php/catalog/2783).
+```{r}
+## Here set your working directory to where the are downloaded 
+setwd("D:/Dropbox/Dropbox/Personal/data_science/assignments/project/")
+
+library(haven)
+## merge on the household consumption  
+agg_cons <- read_dta("ethiopia_lsms/Consumption Aggregate/cons_agg_w3.dta")
+## agg_cons <- agg_cons[,c("household_id", "household_id2", "total_cons_ann", "nom_totcons_aeq", "saq01", "rural")]
+agg_cons$urban <- ifelse(agg_cons$rural %in% 2:3, 1, 0)
+
+
+## this is a listing of all household members, here we'll get data on the household head 
+sect1 <- read_dta("ethiopia_lsms/Household/sect1_hh_w3.dta") 
+    ## region code - saq01
+    ##marital status - hh_s1q08 (have to limit to head)
+    ##hh_s1q03 - sex (have to limit to head of household ) 
+    ## hh_s1q07 - religion 
+
+sect1_hhead <- sect1[which(sect1$hh_s1q02 == 1),]
+sect1_hhead <- sect1_hhead[,c("household_id", "household_id2", "hh_s1q08", "hh_s1q02", "hh_s1q32_b", "hh_s1q03","hh_s1q07", "individual_id", "individual_id2")]
+## married household head 
+  sect1_hhead$married_hhead <- 0 
+  sect1_hhead$married_hhead <- ifelse(sect1_hhead$hh_s1q08 %in% 2:3, 1, 0)
+  summary(sect1_hhead$married_hhead) 
+## gender of head of household 
+  sect1_hhead$female_hhead <- ifelse(sect1_hhead$hh_s1q03 == 2, 1, 0)
+  summary(sect1_hhead$female_hhead)
+  ## relgiion 
+  sect1_hhead$hhead_orthodox <- ifelse(sect1_hhead$hh_s1q07 == 1, 1, 0) 
+  sect1_hhead$hhead_protestant <- ifelse(sect1_hhead$hh_s1q07 == 3, 1, 0) 
+  sect1_hhead$hhead_islam <- ifelse(sect1_hhead$hh_s1q07 == 4, 1, 0) 
+  
+  
+## head of household illiterate  
+  sect1_sondaughter <- sect1[which(sect1$hh_s1q02 == 2),]
+  sect1_hhhead_gender<- sect1_hhead[,c("household_id", "household_id2", "female_hhead")]
+  sect1_sondaughter<- merge(sect1_sondaughter, sect1_hhhead_gender, by=c("household_id","household_id2"))
+    sect1_sondaughter$hhead_illiterate <- ifelse(sect1_sondaughter$hh_s1q15 == 98,1,0)
+    sect1_sondaughter$hhead_illiterate <- ifelse(sect1_sondaughter$female_hhead == 1 & sect1_sondaughter$hh_s1q19 == 98,1,sect1_sondaughter$hhead_illiterate)
+  summary(sect1_sondaughter$hhead_illiterate)
+  sect1_sondaughter<- sect1_sondaughter[,c("household_id", "household_id2", "hhead_illiterate")]   
+  sect1_hhead <- merge(sect1_hhead,sect1_sondaughter,by=c("household_id","household_id2"), all.x = TRUE)
+    ## assuming not illerate, if not children to prove that they are illiterate
+  sect1_hhead$hhead_illiterate[is.na(sect1_hhead$hhead_illiterate)] <- 0
+  summary(sect1_hhead$hhead_illiterate) 
+
+  
+  ## merge these household head variables onto the household member roster
+  lsms <- merge(agg_cons,sect1_hhead,by=c("household_id","household_id2"))
+  
+
+# source of drinking water 
+sect9 <- read_dta("ethiopia_lsms/Household/sect9_hh_w3.dta") 
+sect9 <- sect9[,c("household_id","household_id2", "hh_s9q13","hh_s9q10","hh_s9q10b","hh_s9q08","hh_s9q21","hh_s9q19_a","hh_s9q05","hh_s9q06","hh_s9q07")]
+## hh_s9q13 - source of drinking water
+sect9$pipedwater <- ifelse(sect9$hh_s9q13 %in% 1:3, 1, 0) 
+summary(sect9$pipedwater)
+
+sect9$surfacewater <- ifelse(sect9$hh_s9q13 == 14, 1, 0) 
+summary(sect9$surfacewater)
+
+sect9$unprotectedwater <- ifelse(sect9$hh_s9q13 == 6, 1, 0) 
+sect9$unprotectedwater <- ifelse(sect9$hh_s9q13 == 9, 1, sect9$unprotectedwater) 
+summary(sect9$unprotectedwater)
+
+
+## hh_s9q10 - toilet type 
+sect9$notoilet <- ifelse(sect9$hh_s9q10 == 7, 1, 0) 
+sect9$flushtoilet <- ifelse(sect9$hh_s9q10 == 1, 1, 0) 
+sect9$latrine <- ifelse(sect9$hh_s9q10 %in% 2:4, 1, 0) 
+
+summary(sect9$notoilet)
+
+## hh_s9q10b - shared toilet 
+sect9$sharedtoilet <- ifelse(sect9$hh_s9q10b == 2, 0, sect9$hh_s9q10b) 
+summary(sect9$sharedtoilet)
+
+## hh_s9q08 - type of kitchen 
+sect9$modernkitchen <- ifelse(sect9$hh_s9q08 %in% 4:5, 1, 0) 
+summary(sect9$modernkitchen)
+
+## hh_s9q21 - cooking fuel
+sect9$advcookingfuel <- ifelse(sect9$hh_s9q21 %in% 7:10, 1, 0) 
+summary(sect9$advcookingfuel)
+
+## hh_s9q19_a - type of lighting 
+sect9$electriclighting <- ifelse(sect9$hh_s9q19_a %in% 1:4, 1, 0) 
+summary(sect9$electriclighting)
+
+
+## hh_s9q05 - wall 
+sect9$finishedwalls <- ifelse(sect9$hh_s9q05 %in% c(6, 7, 11, 14:17), 1, 0) 
+summary(sect9$finishedwalls)
+
+sect9$woodwalls <- ifelse(sect9$hh_s9q05 %in% 1:3, 1, 0) 
+summary(sect9$woodwalls)
+
+
+## hh_s9q06- roof 
+sect9$finishedroof <- ifelse(sect9$hh_s9q06 %in% c(1, 2, 7, 8), 1, 0) 
+summary(sect9$finishedroof)
+
+## hh_s9q07 - floor 
+sect9$finishedfloor <- ifelse(sect9$hh_s9q07 %in% c(4:9), 1, 0) 
+summary(sect9$finishedfloor)
+
+sect9$dirtfloor <- ifelse(sect9$hh_s9q07 == 1, 1, 0) 
+summary(sect9$dirtfloor)
+
+sect9 <- sect9[,c("household_id","household_id2", "pipedwater", 
+                  "notoilet", "sharedtoilet", "modernkitchen", "advcookingfuel", "electriclighting", "finishedwalls", "finishedroof", "finishedfloor", "dirtfloor", "surfacewater", "unprotectedwater", "latrine", "flushtoilet", "woodwalls")]
+
+lsms <- merge(lsms,sect9,by=c("household_id","household_id2"))
+
+## assets 
+  # television 
+sect10 <- read_dta("ethiopia_lsms/Household/sect10_hh_w3.dta") 
+sect10tv <- sect10[sect10$hh_s10q00 == 10,] 
+sect10tv <- sect10tv[,c("household_id","household_id2","hh_s10q00", "hh_s10q0a", "hh_s10q01")]
+lsms <- merge(lsms,sect10tv,by=c("household_id","household_id2"))
+lsms$tv <- ifelse(lsms$hh_s10q01 >0, 1, 0)
+
+  #radio 
+sect10radio <- sect10[sect10$hh_s10q00 == 9,] 
+sect10radio <- sect10radio[,c("household_id","household_id2","hh_s10q00", "hh_s10q0a", "hh_s10q01")]
+sect10radio$radio <- ifelse(sect10radio$hh_s10q01 >0, 1, 0)
+lsms <- merge(lsms,sect10radio,by=c("household_id","household_id2"))
+
+## create log output variable
+lsms$log_total_cons_ann <-log(lsms$total_cons_ann)
+
+## creating poverty status 
+## define poverty as less than $2 pp in 2015 
+## 20.46410 birr to the dollar is average in 2015 
+## 0.38 PPP conversion factor 
+summary(lsms$total_cons_ann)
+lsms$total_cons_ann_usdppp <- (lsms$total_cons_ann/20.46410/0.38) 
+summary(lsms$total_cons_ann_usdppp)
+lsms$total_cons_ann_usdpppdaily <- lsms$total_cons_ann_usdppp / 360
+lsms$total_cons_ann_usdpppdailyperperson <- lsms$total_cons_ann_usdpppdaily / lsms$adulteq
+summary(lsms$total_cons_ann_usdpppdailyperperson)
+lsms$poor <- ifelse(lsms$total_cons_ann_usdpppdailyperperson < 2, "poor", "not poor")
+table(lsms$poor)
+```
+
