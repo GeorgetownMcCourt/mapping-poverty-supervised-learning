@@ -135,16 +135,32 @@ $(document).ready(function () {
 </div>
 <div id="research-questions-and-outline" class="section level3">
 <h3>Research Questions and Outline</h3>
-<p>This project aims to improve upon the Poverty Mapping methodology. Specifically, it will answer three questions: 1. How accurate is the World Bank’s poverty mapping approach? 2. Are there other data science methods that could more accurately predict poverty status than the current poverty mapping approach? 3. How do the methods’ accuracy impact the calculation of the number of poor households?</p>
+<p>This project aims to improve upon the Poverty Mapping methodology. Specifically, it will answer three questions:</p>
+<ol style="list-style-type: decimal">
+<li><p>How accurate is the World Bank’s poverty mapping approach?</p></li>
+<li><p>Are there other data science methods that could more accurately predict poverty status than the current poverty mapping approach?</p></li>
+<li><p>How do the methods’ accuracy impact the calculation of the number of poor households?</p></li>
+</ol>
 <p>To answer these questions, I will focus on Ethiopia. The World Bank classifies Ethiopia as an low income with about a 37 percent of its population living on less than $2 per day.</p>
 <p>I find that models created by the World Bank methodology make fairly inaccurate predictions of income, and subsequently poverty status. In this work, other approaches to prediction, such as decision trees and random forests, do not create more accurate predictions.</p>
 <p>The outline of this report is as follows. First, I will create a baseline accuracy score by replicating the World Bank methodology, while reserving 15 percent of the sample for testing The data is semi-public with registration here: <a href="http://microdata.worldbank.org/index.php/catalog/2783">Ethiopia Socioeconomic Survey 2015-2016</a>. Second, I will use other supervised learning approaches to create alternative methodologies, comparing their accuracy to the World Bank methodology. Finally, I conclude by comparing the differences in the size of the “poor” population in the eleven regions of Ethiopia.</p>
 </div>
 <div id="replicating-the-poverty-mapping-approach" class="section level3">
 <h3>Replicating the Poverty Mapping Approach</h3>
-<p>Researchers use a survey-to-census imputation model to provide estimates of the proportion of the population living in poverty at more granular geographic levels, such as counties or districts. To perform this process, the research normally follows the following steps.<br />
-1. Begin with a living standards measurement survey (LSMS), in which annual consumption/income, and subsequently poverty status, are determined.<br />
-2. Build an OLS model on the LSMS data that uses a set of features to predict income. These indicators must exist in both the LSMS and census data sets. 3. A few rules of thumb guide model construction: + (a) retain predictors that have a statistically significant relationship with income; + (b) focus on getting the R-squared above 0.5. 4. Apply this model’s coefficients to the observations in the census to predict income. 5. Then, the census data set provides an adequate sample size to determine poverty at a more granular administrative level.</p>
+<p>Researchers use a survey-to-census imputation model to provide estimates of the proportion of the population living in poverty at more granular geographic levels, such as counties or districts. To perform this process, the research normally follows the following steps.</p>
+<ol style="list-style-type: decimal">
+<li><p>Begin with a living standards measurement survey (LSMS), in which annual consumption/income, and subsequently poverty status, are determined.</p></li>
+<li><p>Build an OLS model on the LSMS data that uses a set of features to predict income. These indicators must exist in both the LSMS and census data sets.</p></li>
+<li>A few rules of thumb guide model construction:</li>
+</ol>
+<ol style="list-style-type: lower-alpha">
+<li>retain predictors that have a statistically significant relationship with income;</li>
+<li>focus on getting the R-squared above 0.5.</li>
+</ol>
+<ol start="4" style="list-style-type: decimal">
+<li><p>Apply this model’s coefficients to the observations in the census to predict income.</p></li>
+<li><p>Then, the census data set provides an adequate sample size to determine poverty at a more granular administrative level.</p></li>
+</ol>
 <pre><code>## Loading required package: knitr</code></pre>
 <pre><code>## 
 ## Call:
